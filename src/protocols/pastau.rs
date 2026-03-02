@@ -693,3 +693,30 @@ pub fn make_iter_data(fx: &Fixture, rng: &mut impl RngCore) -> IterData {
 
     IterData { rho, req, nonces }
 }
+
+pub fn respond_var_payload_with_nonce(
+    srv: &PastauServer,
+    c: ClientId,
+    payload: &[u8],
+    req_bytes: &[u8; TOP_REQ_LEN],
+    nonce: &[u8; crypto_core::NONCE_LEN],
+) -> Option<ServerResponse> {
+    let rec = srv.records.get(&c)?;
+    let req_point = CompressedRistretto(*req_bytes).decompress()?;
+
+    let z_i = pc::toprf_eval_share(rec.k_i, &req_point);
+    let z_bytes = z_i.compress().to_bytes();
+
+    let msg = build_ttg_msg_heap(payload, &c);
+    let y_i = pc::ttg_part_eval(&srv.ttg_share, &msg);
+    let y_bytes = pc::ttg_partial_to_bytes(&y_i);
+
+    let aad: [u8; 0] = [];
+    let ctxt_i = pc::xchacha_encrypt_detached_with_nonce(&rec.h_i, &aad, &y_bytes, nonce);
+
+    Some(ServerResponse {
+        server_id: srv.id,
+        z_i: z_bytes,
+        ctxt_i,
+    })
+}
